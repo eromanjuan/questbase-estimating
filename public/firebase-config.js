@@ -1,24 +1,13 @@
 /* ======================================================================
    QUEST BASE: Firebase web app configuration
    ----------------------------------------------------------------------
-   Paste your Firebase web app config here. Get it from:
-     Firebase console → Project settings → General → Your apps → Web app
-
-   The config looks like this:
-   const firebaseConfig = {
-     apiKey: "AIza...",
-     authDomain: "quest-estimating.firebaseapp.com",
-     projectId: "quest-estimating",
-     storageBucket: "quest-estimating.appspot.com",
-     messagingSenderId: "123456789",
-     appId: "1:123456789:web:abc123"
-   };
+   Auto-generated from Firebase project quest-estimating
    ====================================================================== */
 const firebaseConfig = {
-  apiKey: "PASTE_YOUR_API_KEY",
+  apiKey: "AIzaSyCaepbhSBnLA_CNVoWjhtidFT3-1poBrNs",
   authDomain: "quest-estimating.firebaseapp.com",
   projectId: "quest-estimating",
-  storageBucket: "quest-estimating.appspot.com",
-  messagingSenderId: "PASTE_YOUR_SENDER_ID",
-  appId: "PASTE_YOUR_APP_ID"
+  storageBucket: "quest-estimating.firebasestorage.app",
+  messagingSenderId: "880513950183",
+  appId: "1:880513950183:web:b3888b2a1f7277bb3e1d42"
 };

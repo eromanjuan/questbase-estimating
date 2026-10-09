@@ -17,7 +17,7 @@ const Sheet = require('../shared/qb-sheet.js');
 admin.initializeApp();
 const db = admin.firestore();
 
-const API_KEY = process.env.FIREBASE_API_KEY || '';
+const API_KEY = process.env.FIREBASE_API_KEY || (functions.config().app && functions.config().app.firebase_api_key) || '';
 const SESSION_DAYS = 30;
 const SESSION_MS = SESSION_DAYS * 24 * 3600 * 1000;
 
