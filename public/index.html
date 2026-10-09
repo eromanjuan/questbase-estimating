@@ -1,0 +1,351 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Questbase Estimating &amp; Proposals</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div class="app">
+
+  <header class="masthead">
+    <div>
+      <p class="brand">Questbase <span>estimating &amp; proposals</span></p>
+      <h1>Estimating &amp; proposals</h1>
+    </div>
+    <div class="mast-actions">
+      <div class="rolebox">
+        <span class="rolelabel">Signed in as</span>
+        <strong id="mastUser"></strong>
+        <span class="pill" id="mastRole"></span>
+        <button type="button" class="btn quiet" id="btnPeople" hidden>People</button>
+        <button type="button" class="btn quiet" id="btnLogout">Sign out</button>
+      </div>
+      <button type="button" class="btn" id="btnSetup" hidden>Setup</button>
+    </div>
+  </header>
+
+  <p class="proto">
+    <span>Saved on the server. Two people can work at once: an estimator fills in tickets, an approver decides on them.</span>
+    <button type="button" class="linkbtn" id="lnkExport">Export data</button>
+  </p>
+
+  <!-- ===== Ticket queue ===== -->
+  <section class="view" id="viewHome">
+    <div class="vbar">
+      <h2 class="vtitle">Tickets</h2>
+      <div class="newbtns" id="newBtns"></div>
+    </div>
+    <div class="filters" id="filters"></div>
+    <div class="tcols" aria-hidden="true"><span>Status</span><span>Client and job</span><span class="r">Quote</span><span class="r two">Profit</span><span>Estimator</span></div>
+    <div class="tlist" id="tlist"></div>
+  </section>
+
+  <!-- ===== One ticket ===== -->
+  <section class="view" id="viewTicket" hidden>
+    <button type="button" class="back" id="btnBack">
+      <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M10 3 5 8l5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      Tickets
+    </button>
+    <div class="vbar">
+      <div>
+        <h2 class="vtitle" id="tTitle"></h2>
+        <p class="tsub" id="tSub"></p>
+      </div>
+      <span class="pill" id="tPill"></span>
+    </div>
+
+    <div class="panel" id="statusPanel"></div>
+
+    <div class="scopebar" id="scopeBar">
+      <div class="sb-head">
+        <h3 id="l-jobs">Scope of work</h3>
+        <div class="sb-tpl">
+          <label class="rolelabel" for="sbTpl">Template</label>
+          <select class="text" id="sbTpl"></select>
+          <button type="button" class="linkbtn apr" data-edit="tpl" hidden>Edit template</button>
+        </div>
+      </div>
+      <fieldset class="lock" id="jobLock">
+        <div class="chips" id="jobChips" role="group" aria-labelledby="l-jobs"></div>
+      </fieldset>
+      <div class="confirm" id="sbConfirm" hidden></div>
+      <p class="ehint" id="sbNote" hidden></p>
+    </div>
+
+    <div class="tabs" role="tablist" aria-label="Ticket sections">
+      <button type="button" role="tab" id="tab-scope" aria-controls="scopeForm">Scope</button>
+      <button type="button" role="tab" id="tab-uw" aria-controls="uwPane">Underwriting</button>
+      <button type="button" role="tab" id="tab-proposal" aria-controls="propPane">Proposal</button>
+    </div>
+
+    <div class="bench" id="bench" data-tab="scope">
+      <div class="col-main">
+
+        <form class="ticket" id="scopeForm" novalidate autocomplete="off">
+          <fieldset class="lock" id="scopeLock">
+            <div class="stub">
+              <label class="wide"><span>Estimator</span><input type="text" id="f-estimator" maxlength="60" placeholder="Your name"></label>
+              <label><span>Date issued</span><input type="date" id="f-issued"></label>
+              <label><span>Proposal #</span><input type="text" id="f-proposalNo" inputmode="numeric" maxlength="24" placeholder="Optional"></label>
+            </div>
+            <div class="perf" aria-hidden="true"></div>
+
+            <div class="group" role="group" aria-labelledby="h-client">
+              <h3 id="h-client">Client</h3>
+              <div class="field"><label for="f-name">Client name</label><input class="text" type="text" id="f-name" maxlength="120"></div>
+              <div class="row-2">
+                <div class="field"><label for="f-phone">Phone</label><input class="text" type="tel" id="f-phone" inputmode="tel" maxlength="30"></div>
+                <div class="field"><label for="f-email">Email</label><input class="text" type="email" id="f-email" inputmode="email" maxlength="120" autocapitalize="off" spellcheck="false"></div>
+              </div>
+              <div class="field"><label for="f-street">Job site address</label><input class="text" type="text" id="f-street" maxlength="120" placeholder="Street"></div>
+              <div class="row-csz">
+                <div class="field"><label for="f-city">City</label><input class="text" type="text" id="f-city" maxlength="60"></div>
+                <div class="field"><label for="f-state">State</label><input class="text" type="text" id="f-state" maxlength="2" autocapitalize="characters"></div>
+                <div class="field"><label for="f-zip">ZIP</label><input class="text" type="text" id="f-zip" inputmode="numeric" maxlength="10"></div>
+              </div>
+            </div>
+
+            <div class="group" role="group" aria-labelledby="h-scope">
+              <h3 id="h-scope">What's included</h3>
+              <div class="q labor">
+                <p class="q-label">Labor</p>
+                <span class="always">Always included</span>
+              </div>
+              <div class="q" id="itemsBox">
+                <div class="q-top"><p class="q-label" id="l-items">Work included</p><button type="button" class="linkbtn apr" data-edit="jobs" hidden>Edit presets</button></div>
+                <p class="ehint" id="itemsHint"></p>
+                <div class="items" id="itemRows" role="group" aria-labelledby="l-items"></div>
+                <div class="itemtools"><button type="button" class="btn add" id="btnAddItem">Add a line</button><button type="button" class="linkbtn" id="btnItemsBack" hidden></button></div>
+              </div>
+              <div class="dyn" id="scopeDyn"></div>
+              <div class="adder apr" id="qAdder" hidden><button type="button" class="btn add" data-edit="addq">Add a question</button></div>
+              <div class="q" id="q-excl">
+                <div class="chips">
+                  <input type="checkbox" id="f-showEx"><label for="f-showEx">List what's not included on the proposal</label>
+                </div>
+                <div class="follow" id="follow-ex" hidden>
+                  <div class="field"><label for="f-extraEx">Anything else not included? <span class="opt">optional, one per line</span></label><textarea class="text" id="f-extraEx" rows="2" maxlength="2000" placeholder="Permits, engineering"></textarea></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="group" role="group" aria-labelledby="h-word">
+              <h3 id="h-word">On the proposal</h3>
+              <div class="field"><label for="f-heading">Heading <span class="opt">optional, fills in from the job</span></label><input class="text" type="text" id="f-heading" maxlength="80"></div>
+              <div class="field"><label for="f-footer">Line under the table</label><input class="text" type="text" id="f-footer" maxlength="160"></div>
+            </div>
+          </fieldset>
+          <div class="group">
+            <p class="quote-out"><span>Client quote, from underwriting</span><strong id="s-quote">$0.00</strong></p>
+            <button type="button" class="btn" id="btnToUw">Go to underwriting</button>
+          </div>
+        </form>
+
+        <div class="ticket" id="uwPane" hidden>
+          <fieldset class="lock" id="uwLock">
+            <div class="uwset" id="uwCrew">
+              <div class="group" role="group" aria-labelledby="h-quote">
+                <h3 id="h-quote">Client quote</h3>
+                <div class="seg" role="radiogroup" aria-label="How the quote is priced">
+                  <input type="radio" name="uw-mode" id="u-mode-sqft" value="sqft"><label for="u-mode-sqft">Per square foot</label>
+                  <input type="radio" name="uw-mode" id="u-mode-lump" value="lump"><label for="u-mode-lump">Lump sum</label>
+                </div>
+                <div class="quote-row" id="u-bySqft">
+                  <div class="field"><label for="u-sqft">SQFT</label><input class="text num" type="text" id="u-sqft" inputmode="decimal" data-uw="sqft" data-fmt="qty"></div>
+                  <span class="op" aria-hidden="true">&times;</span>
+                  <div class="field"><label for="u-rate">Labor price per SQFT</label><div class="money sm"><span aria-hidden="true">$</span><input type="text" id="u-rate" inputmode="decimal" data-uw="rate" data-fmt="money"></div></div>
+                </div>
+                <div class="field" id="u-byLump" hidden><label for="u-lump">Quote</label><div class="money"><span aria-hidden="true">$</span><input type="text" id="u-lump" inputmode="decimal" data-uw="lump" data-fmt="money" placeholder="0.00"></div></div>
+                <p class="quote-out"><span>Client quote</span><strong id="u-quote">$0.00</strong></p>
+                <p class="ehint">This is the total the client sees on the proposal.</p>
+              </div>
+
+              <div class="group" role="group" aria-labelledby="h-labor">
+                <h3 id="h-labor">Labor</h3>
+                <p class="ehint">One line per pay rate. Planned days is the schedule you expect. Overrun days is what it costs if the job runs long.</p>
+                <div class="crews" id="crewRows"></div>
+                <button type="button" class="btn add" id="btnAddCrew">Add crew line</button>
+                <div class="crew-total" id="crewTotal"></div>
+              </div>
+
+              <div class="group" role="group" aria-labelledby="h-sup">
+                <div class="ghead"><h3 id="h-sup">Supplies</h3><button type="button" class="linkbtn apr" data-edit="supplies" hidden>Edit list</button></div>
+                <div class="sups" id="supRows"></div>
+                <button type="button" class="btn add" id="btnAddSup">Add a line for this job</button>
+                <p class="sup-total"><span>Total supplies</span><strong id="supTotal">$0.00</strong></p>
+              </div>
+            </div>
+
+            <div class="uwset" id="uwRoof" hidden>
+              <div class="group" id="g-meas" role="group" aria-labelledby="h-meas">
+                <h3 id="h-meas">Measurements</h3>
+                <p class="ehint">Optional. Flat square feet by pitch gives the true roof area and the squares.</p>
+                <div class="meas" id="measRows"></div>
+                <button type="button" class="btn add" id="btnAddPitch">Add a pitch</button>
+                <div class="stats" id="measTotal"></div>
+                <div class="row-3">
+                  <div class="field"><label for="u-perimeter">Perimeter, ft</label><input class="text num" type="text" id="u-perimeter" inputmode="decimal" data-meas="perimeter" data-fmt="qty"></div>
+                  <div class="field"><label for="u-ridge">Ridge, ft</label><input class="text num" type="text" id="u-ridge" inputmode="decimal" data-meas="ridge" data-fmt="qty"></div>
+                  <div class="field"><label for="u-valley">Valley, ft</label><input class="text num" type="text" id="u-valley" inputmode="decimal" data-meas="valley" data-fmt="qty"></div>
+                </div>
+              </div>
+
+              <div class="group" role="group" aria-labelledby="h-sell">
+                <div class="ghead"><h3 id="h-sell">Client price</h3><button type="button" class="linkbtn apr" data-edit="sell" hidden>Edit prices</button></div>
+                <p class="ehint">What the client pays. Lines with a quantity print on the proposal.</p>
+                <div class="lines" id="sellRows"></div>
+                <button type="button" class="btn add" id="btnAddSell" data-addln="sell">Add a line for this job</button>
+                <p class="quote-out"><span>Client quote</span><strong id="r-quote">$0.00</strong></p>
+              </div>
+
+              <div class="group" role="group" aria-labelledby="h-rlabor">
+                <div class="ghead"><h3 id="h-rlabor">Labor</h3><button type="button" class="linkbtn apr" data-edit="labor" hidden>Edit rates</button></div>
+                <p class="ehint" id="hint-rlabor">Piece rate. The crew is paid a set amount per square for the kind of roof, plus the extras on this job.</p>
+                <div class="lines" id="laborRows"></div>
+                <button type="button" class="btn add" id="btnAddLabor" data-addln="labor">Add a line for this job</button>
+                <p class="sup-total"><span>Total labor</span><strong id="r-labor">$0.00</strong></p>
+              </div>
+
+              <div class="group" role="group" aria-labelledby="h-mats">
+                <div class="ghead"><h3 id="h-mats">Materials</h3><button type="button" class="linkbtn apr" data-edit="mats" hidden>Edit price book</button></div>
+                <p class="ehint" id="hint-mats">Prices come from the price book in Setup. Put a quantity on what this roof needs.</p>
+                <div class="lines" id="matRows"></div>
+                <button type="button" class="btn add" id="btnAddMat" data-addln="mats">Add a line for this job</button>
+                <div class="totals">
+                  <p class="sup-total"><span>Materials</span><strong id="r-matsub">$0.00</strong></p>
+                  <p class="sup-line"><span id="r-taxlabel">Sales tax</span><span id="r-mattax">$0.00</span></p>
+                  <p class="sup-line strong"><span>Materials with tax</span><strong id="r-mattotal">$0.00</strong></p>
+                </div>
+              </div>
+
+              <div class="group" role="group" aria-labelledby="h-unotes">
+                <h3 id="h-unotes">Notes for the approver</h3>
+                <div class="field"><label class="opt" for="u-notes">Stays with the ticket. Never printed on the proposal.</label><textarea class="text" id="u-notes" rows="2" maxlength="2000"></textarea></div>
+              </div>
+            </div>
+          </fieldset>
+        </div>
+
+        <div class="view" id="propPane" hidden>
+          <div class="sheet-head">
+            <p class="locknote" id="lockNote"></p>
+            <div class="sheet-actions">
+              <button type="button" class="btn quiet" id="btnZoom" aria-pressed="false">Zoom in</button>
+              <button type="button" class="btn" id="btnCopy">Copy ticket summary</button>
+            </div>
+          </div>
+          <div class="copybox" id="copyBox" hidden>
+            <p>Copy didn't go through. Select the text below and copy it.</p>
+            <textarea class="text" id="copyText" rows="12" readonly></textarea>
+          </div>
+          <div class="paper-scroll"><div class="pages" id="pagesMain"></div></div>
+        </div>
+      </div>
+
+      <aside class="col-rail" aria-label="Live result">
+        <div id="railPreview">
+          <p class="rail-label">Proposal preview</p>
+          <div class="paper-scroll"><div class="pages" id="pagesRail"></div></div>
+        </div>
+        <div class="summary" id="railSummary" hidden></div>
+      </aside>
+    </div>
+  </section>
+
+  <!-- ===== Setup: the templates ===== -->
+  <section class="view" id="viewSetup" hidden>
+    <div class="setup">
+      <div class="setup-head">
+        <h2 class="vtitle">Setup</h2>
+        <p class="rail-label" id="tplLabel">Templates</p>
+        <div class="filters" id="tplSwitch" role="group" aria-labelledby="tplLabel"></div>
+        <div id="tplNew" hidden></div>
+        <p class="tsub" id="setupSub"></p>
+      </div>
+      <div id="setupBody"></div>
+      <div class="setup-bar">
+        <p class="smsg" id="setupMsg" role="status" aria-live="polite"></p>
+        <div class="confirm" id="confirmDiscard" hidden>
+          <span>Discard your changes?</span>
+          <button type="button" class="btn" id="btnDiscardYes">Discard</button>
+          <button type="button" class="btn" id="btnDiscardNo">Keep editing</button>
+        </div>
+        <button type="button" class="btn" id="btnSetupCancel">Cancel</button>
+        <button type="button" class="btn primary" id="btnSetupSave">Save setup</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== Auth: sign in / first account ===== -->
+  <section class="view" id="viewAuth" hidden>
+    <div class="authwrap">
+      <div class="ncard" id="authSetup">
+        <h3>Set up Questbase Estimating</h3>
+        <p>No accounts yet. The first one becomes the approver — the person who approves tickets and adds other people.</p>
+        <form id="formSetup">
+          <div class="field"><label for="as-name">Your name</label><input class="text" id="as-name" maxlength="60" required></div>
+          <div class="field"><label for="as-email">Email</label><input class="text" id="as-email" type="email" maxlength="120" required></div>
+          <div class="field"><label for="as-pass">Password</label><input class="text" id="as-pass" type="password" minlength="8" maxlength="120" required></div>
+          <div class="pactions"><button class="btn primary" type="submit">Create the account</button></div>
+        </form>
+      </div>
+      <div class="ncard" id="authLogin" hidden>
+        <h3>Sign in</h3>
+        <form id="formLogin">
+          <div class="field"><label for="si-email">Email</label><input class="text" id="si-email" type="email" maxlength="120" required></div>
+          <div class="field"><label for="si-pass">Password</label><input class="text" id="si-pass" type="password" maxlength="120" required></div>
+          <div class="pactions"><button class="btn primary" type="submit">Sign in</button></div>
+          <p class="ehint" id="authErr"></p>
+        </form>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== People (approver only) ===== -->
+  <section class="view" id="viewPeople" hidden>
+    <button type="button" class="back" id="btnPeopleBack">
+      <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M10 3 5 8l5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      Tickets
+    </button>
+    <h2 class="vtitle">People</h2>
+    <div class="notes">
+      <div class="ncard"><h3>Accounts</h3><div id="peopleList"></div></div>
+      <div class="ncard">
+        <h3>Add a person</h3>
+        <form id="formPeople">
+          <div class="row-2">
+            <div class="field"><label for="pp-name">Name</label><input class="text" id="pp-name" maxlength="60"></div>
+            <div class="field"><label for="pp-email">Email</label><input class="text" id="pp-email" type="email" maxlength="120"></div>
+          </div>
+          <div class="row-2">
+            <div class="field"><label for="pp-pass">Password</label><input class="text" id="pp-pass" type="password" minlength="8" maxlength="120"></div>
+            <div class="field"><label for="pp-role">Role</label>
+              <select class="text" id="pp-role">
+                <option value="estimator">Estimator</option>
+                <option value="approver">Approver</option>
+              </select>
+            </div>
+          </div>
+          <div class="pactions"><button class="btn primary" type="submit">Add person</button></div>
+        </form>
+      </div>
+    </div>
+  </section>
+
+  <p class="toast" id="toast" role="status" aria-live="polite" hidden></p>
+</div>
+
+<!-- Firebase JS SDK (compat builds work with plain script tags) -->
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="firebase-config.js"></script>
+<script src="vendor/qb-rules.js"></script>
+<script src="vendor/qb-sheet.js"></script>
+<script src="vendor/jspdf.umd.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

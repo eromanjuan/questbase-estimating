@@ -1,0 +1,13 @@
+{
+  "name": "questbase-estimating",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Questbase estimating & proposals: one underwriting sheet for any kind of construction.",
+  "scripts": {
+    "test": "node scripts/verify-numbers.js",
+    "smoke": "node test/smoke.js"
+  },
+  "devDependencies": {
+    "firebase-tools": "^13.0.0"
+  }
+}

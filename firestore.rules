@@ -1,0 +1,40 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isApprover() {
+      return isSignedIn() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'approver';
+    }
+
+    // Templates: any signed-in user can read/write (matches prototype behavior)
+    match /templates/{template} {
+      allow read, write: if isSignedIn();
+    }
+
+    // Tickets: any signed-in user can read/write
+    match /tickets/{ticket} {
+      allow read, write: if isSignedIn();
+    }
+
+    // Users: anyone can read (needed for login), only approvers can write
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow write: if isApprover() || (isSignedIn() && request.auth.uid == userId);
+    }
+
+    // Sessions: only the owner can read/write
+    match /sessions/{token} {
+      allow read, write: if isSignedIn();
+    }
+
+    // Key-value store (seq counter, etc.): any signed-in user
+    match /kv/{key} {
+      allow read, write: if isSignedIn();
+    }
+  }
+}
