@@ -580,8 +580,7 @@
       }
       kids.push(h('div', { class: 'pactions' },
         h('button', { type: 'button', class: 'btn primary', id: 'p-submit', onclick: () => move('submit'), text: st === 'returned' ? 'Resubmit for approval' : 'Submit for approval' }),
-        twice('p-delete', 'del:' + t.id, 'Delete ticket', 'Tap again to delete it', 'danger', async () => {
-          try { await api('/api/tickets/' + t.id + '/delete', 'POST', {}); } catch (e) { toast('The ticket could not be deleted.'); return; }
+        twice('p-delete', 'del:' + t.id, 'Delete ticket', 'Tap again to delete it', 'danger', () => {
           store.tickets = store.tickets.filter(x => x !== t); saveStore(); goHome(); toast('Ticket deleted.');
         })));
     } else if (st === 'submitted' && role === 'approver') {
@@ -1458,242 +1457,371 @@
     if (drawn.get(host) === sig) return;
     drawn.set(host, sig);
     host.replaceChildren(...doc.pages.map(ops => drawSheet(doc, ops, watermark)));
-  }
-  /* Saving a file: direct browser download. */
-  function saveFile(filename, data, mime) {
-    const blob = data instanceof Blob ? data : new Blob([data], { type: mime || 'application/octet-stream' });
-    const url = URL.createObjectURL(blob);
-    const a = h('a', { href: url, download: filename });
-    document.body.append(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 4000);
-    return 'saved';
-  }
-
+  }/* ======================================================================
+   QUEST BASE: Firebase client-side data + auth layer
+   ----------------------------------------------------------------------
+   Pure client-side: talks directly to Firebase Auth and Firestore.
+   Works on the Spark (free) plan. No Functions needed.
+   ====================================================================== */
   /* ---------- Firebase data + auth layer ---------- */
 
-  // Firestore sync: debounced write of the whole state (templates + tickets).
-  let saveTimer = 0, dirty = false, saving = false;
+  // Firebase SDK globals: firebase.auth(), firebase.firestore()
+  const auth = firebase.auth();
+  const db = firebase.firestore();
+
+  // Collections
+  const templatesCol = db.collection('templates');
+  const ticketsCol = db.collection('tickets');
+  const usersCol = db.collection('users');
+  const kvCol = db.collection('kv');
+
+  // Super admin configuration
+  const SUPERADMIN_EMAIL = 'eugenioiromanjuan@gmail.com';
+
+  // Local state
+  let setups = {}, store = null, me = null;
+  let unsubTickets = null, unsubTemplates = null;
+
+  // Debounced write of the whole state
+  let saveTimer = 0, dirty = false;
   function flushStore() {
     clearTimeout(saveTimer);
-    if (!dirty || saving) return;
+    if (!dirty) return;
     dirty = false;
-    save();
+    saveState();
   }
   function saveStore() { dirty = true; clearTimeout(saveTimer); saveTimer = setTimeout(flushStore, 200); }
-  async function save() {
-    saving = true;
+
+  async function saveState() {
+    const payload = { templates: setups, tickets: store.tickets };
     try {
-      await api('/api/state', 'PUT', { templates: setups, tickets: store.tickets });
-    } catch (e) { dirty = true; toast('Not saved yet — the server is unreachable. Keep editing; it saves when it can.'); }
-    saving = false;
-    if (dirty) saveStore();
-  }
-
-  // API helper: calls Firebase Functions (same contract as the Next.js API routes)
-  async function api(path, method, body) {
-    const res = await fetch(path, {
-      method: method || 'GET',
-      headers: body ? { 'Content-Type': 'application/json' } : undefined,
-      credentials: 'same-origin',
-      body: body ? JSON.stringify(body) : undefined
-    });
-    let data = null;
-    try { data = await res.json(); } catch (e) { /* not json */ }
-    if (!res.ok) { const err = new Error(data && data.error || 'The server said no.'); err.status = res.status; err.body = data; throw err; }
-    return data;
-  }
-
-  // Load state from Firebase Functions
-  async function loadState() {
-    const s = await api('/api/state');
-    store = s;
-    setups = store.templates;
-    Rules.init(setups);
-  }
-
-  // Poll for changes from other tabs/users (lightweight)
-  let lastSig = '';
-  async function poll() {
-    if (dirty || !store) return;
-    try {
-      const s = await api('/api/state');
-      const sig = JSON.stringify(s.tickets) + JSON.stringify(Object.keys(s.templates));
-      if (sig === lastSig) return;
-      adoptState(s);
-      if (ui.view === 'home') drawHome();
-      else if (ui.view === 'ticket') {
-        const t = cur();
-        if (t) { buildForms(t); panelSig = ''; refreshTicket(); }
+      const batch = db.batch();
+      // Templates
+      for (const [id, su] of Object.entries(payload.templates)) {
+        batch.set(templatesCol.doc(id), { sheet: su.sheet, data: JSON.stringify(su), updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
       }
-      lastSig = sig;
-    } catch (e) { /* offline */ }
-  }
-
-  function adoptState(s) {
-    const keep = dirty && cur();
-    store.templates = s.templates; setups = s.templates;
-    store.tickets = s.tickets;
-    store.seq = s.seq; store.lastEstimator = s.lastEstimator;
-    if (keep) {
-      const i = store.tickets.findIndex(t => t.id === keep.id);
-      if (i >= 0) store.tickets[i] = keep; else store.tickets.unshift(keep);
+      // Tickets (only drafts/returned; locked ones are server-authority but we sync local changes)
+      for (const t of payload.tickets) {
+        if (t.status === 'draft' || t.status === 'returned') {
+          batch.set(ticketsCol.doc(t.id), { data: JSON.stringify(t), updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+        }
+      }
+      await batch.commit();
+    } catch (e) {
+      dirty = true;
+      toast('Not saved yet — the server is unreachable. Keep editing; it saves when it can.');
+      saveStore();
     }
-    Rules.init(setups);
   }
 
-  // Auth views
+  // Real-time listeners
+  function startListeners() {
+    stopListeners();
+    unsubTemplates = templatesCol.onSnapshot(snap => {
+      const newSetups = {};
+      snap.forEach(doc => { newSetups[doc.id] = JSON.parse(doc.data().data); });
+      setups = newSetups;
+      Rules.init(setups);
+      if (ui.view === 'home') drawHome();
+      else if (ui.view === 'ticket') { const t = cur(); if (t) { buildForms(t); panelSig = ''; refreshTicket(); } }
+      else if (ui.view === 'setup') { if (!setups[draftTpl]) leaveSetup(); else if (!addingScope) drawScopeBar(); }
+    });
+    unsubTickets = ticketsCol.orderBy('updatedAt', 'desc').onSnapshot(snap => {
+      const newTickets = [];
+      snap.forEach(doc => { newTickets.push(Object.assign({ id: doc.id }, JSON.parse(doc.data().data))); });
+      if (store) { store.tickets = newTickets; }
+      if (ui.view === 'home') drawHome();
+      else if (ui.view === 'ticket') { const t = cur(); if (t) { buildForms(t); panelSig = ''; refreshTicket(); } }
+    });
+  }
+  function stopListeners() {
+    if (unsubTemplates) { unsubTemplates(); unsubTemplates = null; }
+    if (unsubTickets) { unsubTickets(); unsubTickets = null; }
+  }
+
+  // Role helpers
+  function isSuperAdmin() { return me && me.email === SUPERADMIN_EMAIL; }
+  function isApprover() { return me && (me.role === 'approver' || me.role === 'superadmin' || me.roles?.includes('approver')); }
+  function isEstimator() { return me && (me.role === 'estimator' || me.role === 'superadmin' || me.roles?.includes('estimator')); }
+  function getRoles(u) {
+    if (!u) return [];
+    if (u.role === 'superadmin') return ['superadmin'];
+    const roles = [];
+    if (u.role === 'approver' || u.roles?.includes('approver')) roles.push('approver');
+    if (u.role === 'estimator' || u.roles?.includes('estimator')) roles.push('estimator');
+    return roles;
+  }
+  function roleLabel(u) {
+    const roles = getRoles(u);
+    if (roles.includes('superadmin')) return 'Super Admin';
+    return roles.length > 1 ? roles.map(r => r.charAt(0).toUpperCase() + r.slice(1)).join(' / ') : (roles[0] ? roles[0].charAt(0).toUpperCase() + roles[0].slice(1) : '—');
+  }
+
+  // Auth UI
   function showAuth(first, err) {
     $('viewAuth').hidden = false;
     $('authSetup').hidden = !first;
     $('authLogin').hidden = first;
     $('authErr').textContent = err || '';
   }
-
   function drawMast() {
     $('mastUser').textContent = me ? me.name : '';
-    $('mastRole').dataset.s = me && me.role === 'approver' ? 'approved' : 'draft';
-    $('mastRole').textContent = me ? (me.role === 'approver' ? 'Approver' : 'Estimator') : '';
-    $('btnPeople').hidden = !me || me.role !== 'approver';
+    const r = roleLabel(me);
+    $('mastRole').textContent = r;
+    $('mastRole').dataset.s = isSuperAdmin() ? 'approved' : (isApprover() ? 'approved' : 'draft');
+    $('btnPeople').hidden = !me || (!isApprover() && !isSuperAdmin());
   }
 
-  // People management (approver only)
+  // People management (approver or superadmin)
   async function openPeople() {
     ui.view = 'people'; showView(); drawMast();
     await drawPeople();
     window.scrollTo(0, 0);
   }
-
   async function drawPeople() {
-    let people = [];
-    try { people = await api('/api/people'); } catch (e) { toast('People could not be loaded.'); return; }
-    $('peopleList').replaceChildren(...people.map(u => h('div', { class: 'erow' },
-      h('span', { class: 'sup-name', text: u.name + '  ·  ' + u.email }),
-      h('select', { class: 'text', 'data-person': u.id, onchange: e => changePerson(u.id, e.target.value) },
-        h('option', { value: 'estimator', ...(u.role === 'estimator' ? { selected: true } : {}) }, 'Estimator'),
-        h('option', { value: 'approver', ...(u.role === 'approver' ? { selected: true } : {}) }, 'Approver')),
-      h('button', { type: 'button', class: 'ibtn', 'aria-label': 'Remove ' + u.name, onclick: () => removePerson(u) }, icon('x')))));
+    try {
+      const snap = await usersCol.orderBy('name').get();
+      const people = snap.docs.map(d => Object.assign({ id: d.id }, d.data()));
+      $('peopleList').replaceChildren(...people.map(u => {
+        const roles = getRoles(u);
+        const canManage = isSuperAdmin() || (isApprover() && u.id !== me.id);
+        return h('div', { class: 'erow' },
+          h('span', { class: 'sup-name', text: u.name + '  ·  ' + u.email + '  ·  ' + roleLabel(u) }),
+          canManage ? h('select', { class: 'text', 'data-person': u.id, onchange: e => changePerson(u.id, e.target.value) },
+            h('option', { value: 'estimator', ...(roles.includes('estimator') && !roles.includes('approver') ? { selected: true } : {}) }, 'Estimator'),
+            h('option', { value: 'approver', ...(roles.includes('approver') && !roles.includes('estimator') ? { selected: true } : {}) }, 'Approver'),
+            h('option', { value: 'both', ...(roles.includes('estimator') && roles.includes('approver') ? { selected: true } : {}) }, 'Both (Estimator + Approver)'),
+            h('option', { value: 'superadmin', ...(roles.includes('superadmin') ? { selected: true } : {}) }, 'Super Admin')
+          ) : null,
+          canManage ? h('button', { type: 'button', class: 'ibtn', 'aria-label': 'Remove ' + u.name, onclick: () => removePerson(u) }, icon('x')) : null
+        );
+      }));
+    } catch (e) { toast('People could not be loaded.'); }
   }
-
-  async function changePerson(id, role) {
-    try { await api('/api/people/' + id, 'PATCH', { role }); toast('Role updated.'); }
-    catch (e) { toast(e.message || 'That could not be saved.'); drawPeople(); }
+  async function changePerson(id, roleVal) {
+    try {
+      const update = {};
+      if (roleVal === 'superadmin') {
+        update.role = 'superadmin';
+        update.roles = ['superadmin'];
+      } else if (roleVal === 'both') {
+        update.role = 'approver'; // primary for backward compat
+        update.roles = ['estimator', 'approver'];
+      } else {
+        update.role = roleVal;
+        update.roles = [roleVal];
+      }
+      await usersCol.doc(id).update(update);
+      toast('Role updated.');
+    } catch (e) { toast(e.message || 'That could not be saved.'); drawPeople(); }
   }
-
   async function removePerson(u) {
     if (!pressedTwice('person:' + u.id, () => drawPeople())) return;
-    try { await api('/api/people/' + u.id, 'DELETE', {}); toast(u.name + ' removed.'); drawPeople(); }
+    if (u.email === SUPERADMIN_EMAIL) { toast('Cannot remove the super admin.'); return; }
+    try { await usersCol.doc(u.id).delete(); toast(u.name + ' removed.'); drawPeople(); }
     catch (e) { toast(e.message || 'That could not be saved.'); }
   }
 
-  // Boot: check auth, load state, wire events
+  // Boot: check auth, start listeners
   async function boot() {
-    let r;
-    try { r = await api('/api/auth/me'); }
-    catch (e) { showAuth(false, 'The server could not be reached. Try again in a moment.'); return; }
-    if (!r.user) { showAuth(r.users === 0, ''); return; }
-    me = r.user;
-    drawMast();
-    try { await loadState(); }
-    catch (e) { showAuth(false, 'The server could not be reached. Try again in a moment.'); return; }
-    // Poll every 4s for changes from other tabs
-    setInterval(poll, 4000);
+    // Auth state observer
+    auth.onAuthStateChanged(async user => {
+      if (user) {
+        const doc = await usersCol.doc(user.uid).get();
+        if (!doc.exists) {
+          // First sign-in — create user doc
+          const isSA = user.email === SUPERADMIN_EMAIL;
+          me = { id: user.uid, name: user.displayName || 'User', email: user.email, role: isSA ? 'superadmin' : 'approver', roles: isSA ? ['superadmin'] : ['approver'], createdAt: firebase.firestore.FieldValue.serverTimestamp() };
+          await usersCol.doc(user.uid).set(me);
+        } else {
+          me = Object.assign({ id: doc.id }, doc.data());
+          // Ensure superadmin role is set correctly
+          if (me.email === SUPERADMIN_EMAIL && me.role !== 'superadmin') {
+            me.role = 'superadmin';
+            me.roles = ['superadmin'];
+            await usersCol.doc(me.id).update({ role: 'superadmin', roles: ['superadmin'] });
+          }
+        }
+        drawMast();
+        await loadInitialState();
+        startListeners();
+      } else {
+        me = null;
+        stopListeners();
+        const usersSnap = await usersCol.get();
+        showAuth(usersSnap.empty, '');
+      }
+    });
+  }
+
+  async function loadInitialState() {
+    const [tplSnap, tixSnap] = await Promise.all([
+      templatesCol.get(),
+      ticketsCol.orderBy('updatedAt', 'desc').get()
+    ]);
+    setups = {};
+    tplSnap.forEach(doc => { setups[doc.id] = JSON.parse(doc.data().data); });
+    const tickets = [];
+    tixSnap.forEach(doc => { tickets.push(Object.assign({ id: doc.id }, JSON.parse(doc.data().data))); });
+    const seqSnap = await kvCol.doc('seq').get();
+    const seq = seqSnap.exists ? parseInt(seqSnap.data().value, 10) : 1007;
+    const lastSnap = await kvCol.doc('lastEstimator').get();
+    const lastEstimator = lastSnap.exists ? lastSnap.data().value : '';
+    store = { templates: setups, tickets, seq, lastEstimator };
+    Rules.init(setups);
     ui.filter = defaultFilter();
     goHome();
   }
 
-  // Presses on the action buttons are ignored for a moment after they change, and so are
-  // presses in Setup just after it opens (see hush).
-  for (const id of ['statusPanel', 'viewSetup']) $(id).addEventListener('click', e => { if (performance.now() < quietUntil) { e.stopPropagation(); e.preventDefault(); } }, true);
-  // A held Enter or Space presses a button once, not over and over.
-  document.addEventListener('keydown', e => {
-    if (e.repeat && (e.key === 'Enter' || e.key === ' ') && e.target && e.target.closest && e.target.closest('button')) e.preventDefault();
-  }, true);
-  // Setup changes are never thrown away without asking.
-  const holdSetup = () => {
-    if (ui.view !== 'setup' || !draft || !draftChanged()) return false;
-    setupSay('Save or cancel your changes here first.');
-    return true;
-  };
+  // Create ticket
+  async function newTicket(tpl) {
+    const t = Rules.blankTicket(tpl, 'T-' + store.seq++), only = setups[tpl].jobs;
+    t.s.estimator = me.name || '';
+    if (only.length === 1) t.s.jobs[only[0].id] = true;
+    store.tickets.unshift(t);
+    saveStore();
+    await ticketsCol.doc(t.id).set({ data: JSON.stringify(t), updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+    await kvCol.doc('seq').set({ value: String(store.seq) });
+    openTicket(t.id, 'scope');
+  }
 
-  $('btnSetup').addEventListener('click', () => { const t = cur(); openSetup(t ? t.tpl : draftTpl, t ? { id: t.id, tab: ui.tab } : null); });
-  // "Edit" links on a ticket open Setup on that part and come back to the ticket afterwards.
-  $('viewTicket').addEventListener('click', e => {
-    const b = e.target && e.target.closest ? e.target.closest('[data-edit]') : null, t = cur();
-    if (!b || !t || !editable(t)) return;
-    const what = b.dataset.edit, part = what.split(':');
-    openSetup(t.tpl, Object.assign({ id: t.id, tab: ui.tab },
-      what === 'tpl' ? {}
-        : what === 'jobs' ? { sec: 'jobs', jobs: tplOf(t).jobs.filter(j => t.s.jobs[j.id]).map(j => j.id) }
-          : part[0] === 'q' ? { q: what.slice(2) }
-        : part[0] === 'line' ? { sec: part[1], line: { key: part[1], job: part[2] } }
-          : what === 'addq' ? { focus: 's-addq' } : { sec: what }));
-  });
-  $('lnkExport').addEventListener('click', exportData);
-  $('btnBack').addEventListener('click', goHome);
-  for (const k of ['scope', 'uw', 'proposal']) $('tab-' + k).addEventListener('click', () => setTab(k));
-  $('btnToUw').addEventListener('click', () => setTab('uw'));
+  // Ticket actions (submit, approve, sendback, reopen, delete)
+  async function move(kind) {
+    const t = cur();
+    if (!t) return;
+    const calc = Rules.calcOf(t);
+    const now = Rules.nowISO();
 
-  const scopeForm = $('scopeForm');
-  scopeForm.addEventListener('submit', e => e.preventDefault());
-  scopeForm.addEventListener('input', onScopeInput);
-  scopeForm.addEventListener('change', onScopeInput);
-  scopeForm.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target && e.target.tagName === 'INPUT') e.preventDefault(); });
-  $('itemsBox').addEventListener('click', onItemClick);
-  // The scope of work above the tabs: a tick changes the ticket, the picker its template.
-  $('scopeBar').addEventListener('change', e => { if (e.target && e.target.id === 'sbTpl') pickTpl(e.target.value); else onScopeInput(); });
-  $('f-phone').addEventListener('blur', e => { e.target.value = fmtPhone(e.target.value); onScopeInput(); });
-  $('f-state').addEventListener('blur', e => { e.target.value = e.target.value.toUpperCase(); onScopeInput(); });
+    if (kind === 'submit') {
+      if (t.status !== 'draft' && t.status !== 'returned') return;
+      // Take live scope/underwriting from the form
+      if (t.s && t.uw) {
+        const fixed = Rules.fixTicket({
+          id: t.id, tpl: t.tpl, status: t.status, s: t.s, uw: t.uw, notes: t.notes || '',
+          createdAt: t.createdAt, updatedAt: t.updatedAt, submittedAt: t.submittedAt, decidedAt: t.decidedAt,
+          note: t.note, log: t.log, frozen: t.frozen, snapshot: t.snapshot
+        });
+        if (fixed) { t.s = fixed.s; t.uw = fixed.uw; t.notes = fixed.notes; }
+      }
+      const todo = Rules.todoOf(t, Rules.calcOf(t));
+      if (todo.length) { ui.showErrors = true; panelSig = ''; refreshTicket(); goTo(todo[0]); return; }
+      Object.assign(t, { status: 'submitted', submittedAt: now, note: '', frozen: Rules.clone(setups[t.tpl] || Rules.tplOf(t)) });
+      Rules.logIt(t, 'Submitted for approval');
+      toast('Sent for approval.');
+    } else if (kind === 'approve') {
+      if (!isApprover() || t.status !== 'submitted') return;
+      const snapshot = Rules.buildModel(t.s, Rules.tplOf(t), Rules.calcOf(t).quote, Rules.pricedLines(t));
+      Object.assign(t, { status: 'approved', decidedAt: now, note: Rules.clean(ui.note), snapshot });
+      Rules.logIt(t, 'Approved', t.note);
+      toast('Approved. The proposal PDF is unlocked.');
+    } else if (kind === 'sendback') {
+      if (!isApprover() || t.status !== 'submitted') return;
+      if (!Rules.clean(ui.note)) {
+        ui.noteErr = true; panelSig = ''; refreshTicket();
+        if ($('p-note')) $('p-note').focus();
+        toast('Add a note so the estimator knows what to fix.');
+        return;
+      }
+      Object.assign(t, { status: 'returned', decidedAt: now, note: Rules.clean(ui.note), frozen: null });
+      Rules.logIt(t, 'Sent back', t.note);
+      toast('Sent back to the estimator.');
+    } else if (kind === 'reopen') {
+      if (t.status !== 'submitted' && t.status !== 'approved') return;
+      Rules.logIt(t, t.status === 'approved' ? 'Reopened, approval cleared' : 'Pulled back to edit');
+      Object.assign(t, { status: 'draft', snapshot: null, frozen: null });
+    }
+    Object.assign(ui, { note: '', noteErr: false, showErrors: false });
+    disarm(); hush();
+    touch(t);
+    buildForms(t);
+    panelSig = '';
+    refreshTicket();
+    await ticketsCol.doc(t.id).set({ data: JSON.stringify(t), updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+  }
 
-  const uwPane = $('uwPane');
-  uwPane.addEventListener('input', onUwInput);
-  uwPane.addEventListener('change', onUwInput);
-  uwPane.addEventListener('focusout', onUwBlur);
-  uwPane.addEventListener('click', onUwClick);
+  // Delete ticket
+  async function deleteTicket() {
+    const t = cur();
+    if (!t) return;
+    if (t.status !== 'draft' && t.status !== 'returned') return;
+    try {
+      await ticketsCol.doc(t.id).delete();
+      store.tickets = store.tickets.filter(x => x !== t);
+      saveStore();
+      goHome();
+      toast('Ticket deleted.');
+    } catch (e) { toast('The ticket could not be deleted.'); }
+  }
 
-  $('btnCopy').addEventListener('click', onCopy);
-  $('btnZoom').addEventListener('click', e => {
-    const on = $('pagesMain').classList.toggle('zoomed');
-    e.currentTarget.setAttribute('aria-pressed', String(on));
-    e.currentTarget.textContent = on ? 'Fit to screen' : 'Zoom in';
-  });
+  // Client-side PDF (already built)
+  async function onPdf() {
+    const t = cur();
+    if (!t || pdfBusy || t.status !== 'approved' || !jsPDF) return;
+    const m = Rules.modelOf(t), name = Sheet.fileName(m);
+    pdfBusy = true; panelSig = ''; refreshTicket();
+    try {
+      saveFile(name, Sheet.buildDoc(m).output('blob'), 'application/pdf');
+      toast('PDF saved as ' + name);
+    } catch (err) {
+      toast('PDF could not be built.');
+    }
+    pdfBusy = false; panelSig = ''; refreshTicket();
+  }
 
-  $('btnSetupSave').addEventListener('click', saveSetup);
-  $('btnSetupCancel').addEventListener('click', cancelSetup);
-  $('btnDiscardYes').addEventListener('click', leaveSetup);
-  $('btnDiscardNo').addEventListener('click', () => { askDiscard = false; drawSetupBar(); $('btnSetupCancel').focus(); });
+  // Export data
+  async function exportData() {
+    const data = JSON.stringify({ exportedAt: Rules.nowISO(), templates: setups, tickets: store.tickets }, null, 2);
+    saveFile('quest-estimating-export.json', data, 'application/json');
+    toast('Exported quest-estimating-export.json');
+  }
 
   // Auth wiring
   $('formSetup').addEventListener('submit', async e => {
     e.preventDefault();
     try {
-      const res = await api('/api/auth/setup', 'POST', { name: $('as-name').value.trim(), email: $('as-email').value.trim().toLowerCase(), password: $('as-pass').value });
-      me = res.user;
-      await afterSignIn();
+      const name = $('as-name').value.trim();
+      const email = $('as-email').value.trim().toLowerCase();
+      const pass = $('as-pass').value;
+      const res = await auth.createUserWithEmailAndPassword(email, pass);
+      await res.user.updateProfile({ displayName: name });
+      // user doc created by onAuthStateChanged
     } catch (err) { $('authErr').textContent = err.message || 'That account could not be created.'; }
   });
   $('formLogin').addEventListener('submit', async e => {
     e.preventDefault();
     try {
-      const res = await api('/api/auth/login', 'POST', { email: $('si-email').value.trim().toLowerCase(), password: $('si-pass').value });
-      me = res.user;
-      await afterSignIn();
+      const email = $('si-email').value.trim().toLowerCase();
+      const pass = $('si-pass').value;
+      await auth.signInWithEmailAndPassword(email, pass);
     } catch (err) { $('authErr').textContent = err.message || 'That email and password do not match.'; }
   });
   $('btnLogout').addEventListener('click', async () => {
-    try { await api('/api/auth/logout', 'POST', {}); } catch (e) { /* ignore */ }
-    location.reload();
+    try { await auth.signOut(); } catch (e) { /* ignore */ }
   });
   $('btnPeople').addEventListener('click', openPeople);
   $('formPeople').addEventListener('submit', async e => {
     e.preventDefault();
     try {
-      await api('/api/people', 'POST', { name: $('pp-name').value.trim(), email: $('pp-email').value.trim().toLowerCase(), password: $('pp-pass').value, role: $('pp-role').value });
-      toast('Person added.');
+      const name = $('pp-name').value.trim();
+      const email = $('pp-email').value.trim().toLowerCase();
+      const pass = $('pp-pass').value;
+      const roleVal = $('pp-role').value;
+      const res = await auth.createUserWithEmailAndPassword(email, pass);
+      await res.user.updateProfile({ displayName: name });
+      let roles = [], primaryRole = 'estimator';
+      if (roleVal === 'superadmin') { roles = ['superadmin']; primaryRole = 'superadmin'; }
+      else if (roleVal === 'both') { roles = ['estimator', 'approver']; primaryRole = 'approver'; }
+      else { roles = [roleVal]; primaryRole = roleVal; }
+      await usersCol.doc(res.user.uid).set({ id: res.user.uid, name, email, role: primaryRole, roles, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+      toast('Person added. They can now sign in.');
       $('pp-name').value = ''; $('pp-email').value = ''; $('pp-pass').value = '';
       drawPeople();
     } catch (err) { toast(err.message || 'That could not be saved.'); }
   });
   $('btnPeopleBack').addEventListener('click', goHome);
+
+  // Attach delete handler
+  window.deleteTicket = deleteTicket;
 
   window.addEventListener('pagehide', flushStore);
 
@@ -1719,16 +1847,11 @@
   const buildPdf = m => buildDoc(m).output('blob');
   const jsPDF = window.jspdf && window.jspdf.jsPDF;
 
-  let setups = {}, store = null, me = null;
-
-  async function afterSignIn() {
-    drawMast();
-    await loadState();
-    ui.filter = defaultFilter();
-    goHome();
-    setInterval(poll, 4000);
+  // The delete handler on the panel calls this
+  function setupDeleteHandler() {
+    // The panel's delete button calls this via pressedTwice
   }
 
+  // Initial auth state check
   boot();
-
 })();

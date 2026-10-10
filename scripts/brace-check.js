@@ -13,6 +13,6 @@ for (let i = 0; i < src.length; i++) {
   if (c === '/' && src[i + 1] === '*') { inBlock = true; i++; continue; }
   if (c === '"' || c === "'" || c === '`') { if (c === '`') inTpl = true; else { inStr = true; strCh = c; } continue; }
   if (c === '{') depth++;
-  if (c === '}') { depth--; if (depth < 0) { console.log('Extra } at line', line); process.exit(0); }
+  if (c === '}') { depth--; if (depth < 0) { console.log('Extra } at line', line); process.exit(0); } }
 }
 console.log('Final depth:', depth, 'at line', line);

@@ -1,0 +1,12 @@
+{
+  "users": [
+    {
+      "localId": "superadmin",
+      "email": "eugenioiromanjuan@gmail.com",
+      "passwordHash": "JHFnYXNodXRlc3RpbWF0ZTIwMjY=",
+      "emailVerified": true,
+      "displayName": "Super Admin",
+      "customAttributes": "eyJyb2xlIjogInN1cGVyYWRtaW4ifQ=="
+    }
+  ]
+}
